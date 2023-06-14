@@ -20,11 +20,10 @@ namespace ServerCleanUp
                 Thread.MaxNumberOfUserThreads = 20;
 
                 CrestronEnvironment.ProgramStatusEventHandler += ProgramEventHandler;
-                CrestronEnvironment.EthernetEventHandler += EthernetEventHandler;
             }
             catch (Exception e)
             {
-                ErrorLog.Error("Error in the constructor: {0}", e.Message);
+                CrestronConsole.PrintLine("Error in the constructor: {0}", e.Message);
             }
         }
 
@@ -35,13 +34,19 @@ namespace ServerCleanUp
                 _longRunning = new Thread(WorkerThread, null);
 
                 //_server = new TCPServer(50005, 10);
-                _server = new TCPServer(new IPEndPoint(IPAddress.Any, 50005), 1024, EthernetAdapterType.EthernetLANAdapter, 10);
+                //_server = new TCPServer(new IPEndPoint(IPAddress.Any, 50005), 1024, EthernetAdapterType.EthernetLANAdapter, 10);
+                _server = new TCPServer(new IPEndPoint(IPAddress.Any, 50005), 1024, EthernetAdapterType.EthernetCSAdapter, 10);
                 _server.SocketStatusChange += ServerStatusChange;
                 _server.WaitForConnectionsAlways(ClientConnectedAsync);
+
+                var adapter = CrestronEthernetHelper.GetAdapterdIdForSpecifiedAdapterType(_server.EthernetAdapterToBindTo);
+                var ipAddress = CrestronEthernetHelper.GetEthernetParameter(CrestronEthernetHelper.ETHERNET_PARAMETER_TO_GET.GET_CURRENT_IP_ADDRESS, adapter);
+
+                CrestronConsole.PrintLine("Server listening on {0}:{1}", ipAddress, _server.PortNumber);
             }
             catch (Exception e)
             {
-                ErrorLog.Error("Error in InitializeSystem: {0}", e.Message);
+                CrestronConsole.PrintLine("Error in InitializeSystem: {0}", e.Message);
             }
         }
 
@@ -62,11 +67,6 @@ namespace ServerCleanUp
                     _server.DisconnectAll();
                     break;
             }
-        }
-
-        void EthernetEventHandler(EthernetEventArgs args)
-        {
-            throw new NotImplementedException();
         }
 
         object WorkerThread(object userObj)
@@ -117,7 +117,9 @@ namespace ServerCleanUp
             if (numBytes <= 0)
             {
                 CrestronConsole.PrintLine("Client {0} closed connection!", clientId);
-                server.Disconnect(clientId);
+
+                /* if (server.ClientConnected(clientId))
+                    server.Disconnect(clientId); */
             }
             else
             {

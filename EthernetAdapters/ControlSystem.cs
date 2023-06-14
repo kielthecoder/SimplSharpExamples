@@ -35,6 +35,7 @@ namespace EthernetAdapters
             }
             catch (Exception e)
             {
+                CrestronConsole.PrintLine("");
                 CrestronConsole.PrintLine("Error getting LAN info: {0}", e.Message);
             }
 
@@ -49,6 +50,7 @@ namespace EthernetAdapters
             }
             catch (Exception e)
             {
+                CrestronConsole.PrintLine("");
                 CrestronConsole.PrintLine("Error getting CS info: {0}", e.Message);
             }
 
@@ -63,6 +65,7 @@ namespace EthernetAdapters
             }
             catch (Exception e)
             {
+                CrestronConsole.PrintLine("");
                 CrestronConsole.PrintLine("Error getting LAN2 info: {0}", e.Message);
             }
         }
