@@ -1,23 +1,24 @@
 using System;
+using System.Threading;
 using System.Text;
+using System.Text.Json;
 using Crestron.SimplSharp;
 using Crestron.SimplSharp.CrestronSockets;
 using Crestron.SimplSharpPro;
-using Crestron.SimplSharpPro.CrestronThread;
 
 namespace BroadcastPackets
 {
     public class ControlSystem : CrestronControlSystem
     {
         private Thread _heartbeat;
-        private bool _running;
+        private CancellationTokenSource _cts;
+        
+        private SystemInfo _info;
 
         public ControlSystem() : base()
         {
             try
             {
-                Thread.MaxNumberOfUserThreads = 20;
-
                 CrestronEnvironment.ProgramStatusEventHandler += ProgramEventHandler;
             }
             catch (Exception e)
@@ -30,7 +31,24 @@ namespace BroadcastPackets
         {
             try
             {
-                _heartbeat = new Thread(HeartbeatThread, null);
+                // Select the LAN network adapter, gather system info
+                var adapterID = CrestronEthernetHelper.GetAdapterdIdForSpecifiedAdapterType(EthernetAdapterType.EthernetLANAdapter);
+                var name = CrestronEthernetHelper.GetEthernetParameter(CrestronEthernetHelper.ETHERNET_PARAMETER_TO_GET.GET_HOSTNAME, adapterID);
+                var ipAddr = CrestronEthernetHelper.GetEthernetParameter(CrestronEthernetHelper.ETHERNET_PARAMETER_TO_GET.GET_CURRENT_IP_ADDRESS, adapterID);
+                var desc = CrestronEnvironment.DevicePlatform.ToString();
+
+                _info = new SystemInfo
+                {
+                    Name = name,
+                    Description = desc,
+                    HostAddress = ipAddr,
+                    Sequence = 0,
+                    Clock = 0
+                };
+
+                _cts = new CancellationTokenSource();
+                _heartbeat = new Thread(HeartbeatThread);
+                _heartbeat.Start(_cts);
             }
             catch (Exception e)
             {
@@ -42,39 +60,53 @@ namespace BroadcastPackets
         {
             if (type == eProgramStatusEventType.Stopping)
             {
-                _running = false;
+                _cts.Cancel();
+
+                CrestronConsole.PrintLine("Joining HeartbeatThread...");
+                _heartbeat.Join();
+                CrestronConsole.PrintLine("All done, should be clean?");
+
+                if (_heartbeat.IsAlive)
+                    CrestronConsole.PrintLine("...but HeartbeatThread is still alive?!");
             }
         }
 
-        object HeartbeatThread(object userObj)
+        void HeartbeatThread(object userObj)
         {
+            if (userObj == null)
+                return;
+
+            // Grab the cancellation token
+            var cts = (CancellationTokenSource)userObj;
+
+            // Create a UDP broadcast server
             var barker = new UDPServer();
             barker.EnableUDPServer("255.255.255.255", 55055);
             barker.ReceiveDataAsync(HeartbeatDataAsync);
 
-            var msg = Encoding.UTF8.GetBytes("AHOY SAILOR!");
+            CrestronConsole.PrintLine("HeartbeatThread running...");
 
-            _running = true;
-            while (_running)
+            while (!cts.IsCancellationRequested)
             {
-                barker.SendDataAsync(msg, msg.Length, HeartbeatSendAsync);
+                // Update system info clock with current tick count
+                _info.Clock = CrestronEnvironment.TickCount;
 
-                Thread.Sleep(1000);
+                // Sequence tracks the packet number
+                _info.Sequence += 1;
 
-                if (!_running)
-                    break;
+                // Serialize system info and package into a byte array
+                var msg = JsonSerializer.SerializeToUtf8Bytes(_info);
 
-                Thread.Sleep(1000);
+                // Broadcast system info to the network
+                // barker.SendDataAsync(msg, msg.Length, HeartbeatSendAsync);
+                barker.SendData(msg, msg.Length);
 
-                if (!_running)
-                    break;
-
-                Thread.Sleep(1000);
+                Thread.Sleep(3000);
             }
 
-            barker.DisableUDPServer();
+            CrestronConsole.PrintLine("HeartbeatThread stopped!");
 
-            return null;
+            barker.DisableUDPServer();
         }
 
         void HeartbeatDataAsync(UDPServer server, int numBytes)
